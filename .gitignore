@@ -1,0 +1,44 @@
+# ==========================
+# Python
+# ==========================
+
+venv/
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+
+# IDE
+
+.vscode/
+.idea/
+
+# ==========================
+# Machine Learning
+# ==========================
+
+ml_engine/dataset/raw/
+ml_engine/dataset/merged/
+ml_engine/dataset/processed/
+ml_engine/dataset/split/
+ml_engine/dataset/ctgan/
+ml_engine/dataset/synthetic/
+ml_engine/dataset/final/
+ml_engine/dataset/selected_features/
+
+ml_engine/models/
+
+ml_engine/reports/
+
+# Logs
+
+*.log
+
+# Notebook checkpoints
+
+.ipynb_checkpoints/
+
+# OS
+
+.DS_Store
+Thumbs.db
