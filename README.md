@@ -489,6 +489,4 @@ Team CyberGuardAI
 
 B.Tech Computer Science & Engineering
 
-Sinhgad Institute of Technology
 
-Pandharpur
