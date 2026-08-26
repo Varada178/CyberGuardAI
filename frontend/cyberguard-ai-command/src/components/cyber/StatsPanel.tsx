@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import { motion, useMotionValue, useSpring, useTransform } from "motion/react";
+import { useDashboard } from "@/context/DashboardContext";
 
 function Counter({ value, decimals = 0 }: { value: number; decimals?: number }) {
   const mv = useMotionValue(0);
@@ -12,42 +13,25 @@ function Counter({ value, decimals = 0 }: { value: number; decimals?: number }) 
 }
 
 export function StatsPanel() {
-  const [stats, setStats] = useState({
-    packets: 3245,
-    connections: 128,
-    threats: 7,
-    accuracy: 98.4,
-    cpu: 34,
-    memory: 62,
-    latency: 12,
-    confidence: 94.2,
-  });
+  const { overview, userStats, loading } = useDashboard();
 
-  useEffect(() => {
-    const id = setInterval(() => {
-      setStats({
-        packets: 3000 + Math.floor(Math.random() * 4000),
-        connections: 100 + Math.floor(Math.random() * 80),
-        threats: Math.floor(Math.random() * 15),
-        accuracy: 97 + Math.random() * 2.5,
-        cpu: 20 + Math.random() * 50,
-        memory: 45 + Math.random() * 35,
-        latency: 8 + Math.random() * 20,
-        confidence: 88 + Math.random() * 11,
-      });
-    }, 1800);
-    return () => clearInterval(id);
-  }, []);
+  if (loading && !overview) {
+    return (
+      <div className="glass rounded-2xl p-4 w-full">
+        <div className="text-xs uppercase tracking-[0.3em] text-muted-foreground">Loading telemetry...</div>
+      </div>
+    );
+  }
 
   const items = [
-    { label: "Packets/s", value: stats.packets, color: "text-cyan" },
-    { label: "Connections", value: stats.connections, color: "text-electric" },
-    { label: "Threats", value: stats.threats, color: "text-danger" },
-    { label: "Accuracy %", value: stats.accuracy, color: "text-safe", decimals: 1 },
-    { label: "CPU %", value: stats.cpu, color: "text-cyan", decimals: 0 },
-    { label: "Memory %", value: stats.memory, color: "text-electric", decimals: 0 },
-    { label: "Latency ms", value: stats.latency, color: "text-warn", decimals: 0 },
-    { label: "Confidence %", value: stats.confidence, color: "text-safe", decimals: 1 },
+    { label: "Your Analyses", value: overview?.user_analyses ?? 0, color: "text-cyan", decimals: 0 },
+    { label: "Threats Found", value: overview?.user_threats_detected ?? 0, color: "text-danger", decimals: 0 },
+    { label: "Model Accuracy %", value: overview?.model_accuracy ?? 0, color: "text-safe", decimals: 1 },
+    { label: "Attack Types", value: overview?.attack_types ?? 0, color: "text-electric", decimals: 0 },
+    { label: "Dataset Samples", value: overview?.total_samples ?? 0, color: "text-cyan", decimals: 0 },
+    { label: "Active Alerts", value: overview?.recent_alerts_count ?? 0, color: "text-warn", decimals: 0 },
+    { label: "F1 Score %", value: overview?.model_f1_score ?? 0, color: "text-safe", decimals: 1 },
+    { label: "Your Accuracy %", value: userStats?.model_accuracy ?? 0, color: "text-safe", decimals: 1 },
   ];
 
   return (
@@ -64,13 +48,6 @@ export function StatsPanel() {
             <div className="text-[10px] uppercase tracking-wider text-muted-foreground">{it.label}</div>
             <div className={`mt-1 text-lg font-light ${it.color} text-glow`} style={{ fontFamily: "Orbitron" }}>
               <Counter value={it.value} decimals={it.decimals ?? 0} />
-            </div>
-            <div className="mt-1 h-0.5 w-full overflow-hidden rounded bg-white/5">
-              <motion.div
-                className="h-full bg-current opacity-60"
-                animate={{ width: `${Math.min(100, (it.value / (it.label.includes("Packets") ? 8000 : it.label.includes("Connections") ? 200 : 100)) * 100)}%` }}
-                transition={{ duration: 1 }}
-              />
             </div>
           </div>
         ))}

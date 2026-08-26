@@ -1,0 +1,61 @@
+from django.urls import path
+
+from .views import (
+    BatchPredictAttackView,
+    DashboardAlertsView,
+    DashboardModelMetricsView,
+    DashboardOverviewView,
+    DashboardRecentPredictionsView,
+    DashboardThreatsView,
+    DashboardUserStatsView,
+    PredictAttackView,
+    RequiredFeaturesView,
+)
+
+urlpatterns = [
+    path(
+        "features/",
+        RequiredFeaturesView.as_view(),
+        name="prediction-features",
+    ),
+    path(
+        "predict/",
+        PredictAttackView.as_view(),
+        name="predict-attack",
+    ),
+    path(
+        "predict/batch/",
+        BatchPredictAttackView.as_view(),
+        name="predict-attack-batch",
+    ),
+    path(
+        "dashboard/overview/",
+        DashboardOverviewView.as_view(),
+        name="dashboard-overview",
+    ),
+    path(
+        "dashboard/threats/",
+        DashboardThreatsView.as_view(),
+        name="dashboard-threats",
+    ),
+    path(
+        "dashboard/model-metrics/",
+        DashboardModelMetricsView.as_view(),
+        name="dashboard-model-metrics",
+    ),
+    path(
+        "dashboard/recent/",
+        DashboardRecentPredictionsView.as_view(),
+        name="dashboard-recent",
+    ),
+    path(
+        "dashboard/alerts/",
+        DashboardAlertsView.as_view(),
+        name="dashboard-alerts",
+    ),
+    path(
+        "dashboard/user-stats/",
+        DashboardUserStatsView.as_view(),
+        name="dashboard-user-stats",
+    ),
+]

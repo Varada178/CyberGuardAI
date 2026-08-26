@@ -1,468 +1,977 @@
+import React, { useEffect, useMemo, useState } from "react";
 import { motion, AnimatePresence } from "motion/react";
-import { useEffect, useMemo, useState } from "react";
 import {
-  X, Zap, Upload, Radio, ShieldAlert, ShieldCheck, Download,
-  RefreshCw, FileText, Cpu, Activity, CheckCircle2,
+  Activity,
+  AlertCircle,
+  CheckCircle2,
+  Loader2,
+  Network,
+  Play,
+  RefreshCw,
+  ShieldAlert,
+  X,
+  Zap,
 } from "lucide-react";
 
-type Tab = "quick" | "upload" | "live";
+/* =========================================================
+   API CONFIGURATION
+   ========================================================= */
 
-const PROTOCOLS = ["TCP", "UDP", "HTTP", "HTTPS", "ICMP"];
+// Change ONLY this if your Django backend runs somewhere else.
+const API_BASE_URL =
+  import.meta.env.VITE_API_BASE_URL || "http://127.0.0.1:8000";
 
-const DEFAULTS = () => ({
-  protocol: "TCP",
-  dstPort: "80",
-  flowDuration: "1284920",
-  packetLength: "1420",
-  fwdPackets: "482",
-  bwdPackets: "17",
-  flowBytesPerSec: "184203.44",
-  syn: "128",
-  ack: "42",
-  fin: "3",
-  rst: "9",
-  urg: "0",
-});
+// Change these two paths if your urls.py uses different paths.
+const REQUIRED_FEATURES_ENDPOINT =
+  "/api/prediction/features/";
 
-const ANALYSIS_STEPS = [
-  "Extracting Features",
-  "Normalizing Data",
-  "Running Random Forest",
-  "Checking Threat Intelligence",
-  "Computing Confidence",
-  "Generating Prediction",
-];
+const PREDICT_ENDPOINT =
+  "/api/prediction/predict/";
 
-export function NetworkAnalysisModal({ open, onClose }: { open: boolean; onClose: () => void }) {
-  const [tab, setTab] = useState<Tab>("quick");
-  const [fields, setFields] = useState(DEFAULTS());
-  const [phase, setPhase] = useState<"idle" | "running" | "result">("idle");
-  const [step, setStep] = useState(0);
-  const [result, setResult] = useState<null | ReturnType<typeof buildResult>>(null);
-  const [uploadProg, setUploadProg] = useState<number | null>(null);
-  const [fileName, setFileName] = useState<string | null>(null);
+/* =========================================================
+   TYPES
+   ========================================================= */
+
+interface NetworkAnalysisModalProps {
+  open: boolean;
+  onClose: () => void;
+}
+
+interface RequiredFeaturesResponse {
+  success: boolean;
+  count: number;
+  features: string[];
+  message?: string;
+  errors?: Record<string, unknown>;
+}
+
+interface PredictionData {
+  id?: number | string;
+  predicted_attack?: string;
+  confidence?: number;
+  risk_level?: string;
+  is_attack?: boolean;
+  recommendation?: string;
+  created_at?: string;
+  [key: string]: unknown;
+}
+
+interface PredictionResponse {
+  success: boolean;
+  message?: string;
+  data?: PredictionData;
+  errors?: Record<string, unknown>;
+}
+
+interface FeatureValues {
+  [key: string]: string;
+}
+
+/* =========================================================
+   AUTHENTICATION
+   ========================================================= */
+
+/**
+ * Your application stores the JWT here:
+ *
+ * cyberguard_access_token
+ *
+ * Therefore we use this exact key.
+ */
+function getAccessToken(): string | null {
+  return localStorage.getItem("cyberguard_access_token");
+}
+
+/**
+ * Build authenticated headers for Django REST Framework.
+ */
+function getAuthHeaders(): HeadersInit {
+  const token = getAccessToken();
+
+  if (!token) {
+    throw new Error(
+      "Authentication token not found. Please login again."
+    );
+  }
+
+  return {
+    "Content-Type": "application/json",
+    Authorization: `Bearer ${token}`,
+  };
+}
+
+/* =========================================================
+   ERROR HELPERS
+   ========================================================= */
+
+function formatBackendErrors(
+  errors?: Record<string, unknown>
+): string {
+  if (!errors) {
+    return "";
+  }
+
+  try {
+    if (typeof errors === "string") {
+      return errors;
+    }
+
+    return Object.entries(errors)
+      .map(([key, value]) => {
+        if (Array.isArray(value)) {
+          return `${key}: ${value.join(", ")}`;
+        }
+
+        if (typeof value === "object" && value !== null) {
+          return `${key}: ${JSON.stringify(value)}`;
+        }
+
+        return `${key}: ${String(value)}`;
+      })
+      .join("\n");
+  } catch {
+    return "An unknown backend error occurred.";
+  }
+}
+
+/* =========================================================
+   API - REQUIRED FEATURES
+   ========================================================= */
+
+async function fetchRequiredFeatures(): Promise<string[]> {
+  const headers = getAuthHeaders();
+
+  const response = await fetch(
+    `${API_BASE_URL}${REQUIRED_FEATURES_ENDPOINT}`,
+    {
+      method: "GET",
+      headers,
+    }
+  );
+
+  let data: RequiredFeaturesResponse;
+
+  try {
+    data = await response.json();
+  } catch {
+    throw new Error(
+      `Backend returned an invalid response. HTTP ${response.status}`
+    );
+  }
+
+  if (response.status === 401) {
+    throw new Error(
+      "Your login session has expired. Please login again."
+    );
+  }
+
+  if (!response.ok) {
+    throw new Error(
+      data.message ||
+        formatBackendErrors(data.errors) ||
+        `Unable to load required features. HTTP ${response.status}`
+    );
+  }
+
+  if (!data.success) {
+    throw new Error(
+      data.message ||
+        formatBackendErrors(data.errors) ||
+        "Unable to load required features."
+    );
+  }
+
+  if (!Array.isArray(data.features)) {
+    throw new Error(
+      "Backend did not return a valid feature list."
+    );
+  }
+
+  return data.features;
+}
+
+/* =========================================================
+   API - PREDICTION
+   ========================================================= */
+
+async function predictAttack(
+  features: Record<string, number>
+): Promise<PredictionResponse> {
+  const headers = getAuthHeaders();
+
+  const response = await fetch(
+    `${API_BASE_URL}${PREDICT_ENDPOINT}`,
+    {
+      method: "POST",
+      headers,
+      body: JSON.stringify({
+        features,
+      }),
+    }
+  );
+
+  let data: PredictionResponse;
+
+  try {
+    data = await response.json();
+  } catch {
+    throw new Error(
+      `Backend returned an invalid response. HTTP ${response.status}`
+    );
+  }
+
+  if (response.status === 401) {
+    throw new Error(
+      "Your login session has expired. Please login again."
+    );
+  }
+
+  if (!response.ok) {
+    throw new Error(
+      data.message ||
+        formatBackendErrors(data.errors) ||
+        `Prediction failed. HTTP ${response.status}`
+    );
+  }
+
+  if (!data.success) {
+    throw new Error(
+      data.message ||
+        formatBackendErrors(data.errors) ||
+        "Prediction failed."
+    );
+  }
+
+  return data;
+}
+
+/* =========================================================
+   FEATURE NAME FORMATTER
+   ========================================================= */
+
+function formatFeatureName(feature: string): string {
+  return feature
+    .replace(/_/g, " ")
+    .replace(/\s+/g, " ")
+    .trim()
+    .replace(/\b\w/g, (letter) => letter.toUpperCase());
+}
+
+/* =========================================================
+   MAIN COMPONENT
+   ========================================================= */
+
+export  function NetworkAnalysisModal({
+  open,
+  onClose,
+}: NetworkAnalysisModalProps) {
+  const [features, setFeatures] = useState<string[]>([]);
+
+  const [values, setValues] = useState<FeatureValues>({});
+
+  const [loadingFeatures, setLoadingFeatures] =
+    useState(false);
+
+  const [predicting, setPredicting] =
+    useState(false);
+
+  const [error, setError] = useState<string | null>(null);
+
+  const [prediction, setPrediction] =
+    useState<PredictionData | null>(null);
+
+  const [successMessage, setSuccessMessage] =
+    useState<string | null>(null);
+
+  /* =======================================================
+     LOAD FEATURES
+     ======================================================= */
+
+  const loadFeatures = async () => {
+    setLoadingFeatures(true);
+    setError(null);
+
+    try {
+      const token = getAccessToken();
+
+      if (!token) {
+        throw new Error(
+          "Authentication token not found. Please login again."
+        );
+      }
+
+      const requiredFeatures =
+        await fetchRequiredFeatures();
+
+      setFeatures(requiredFeatures);
+
+      // Create empty values for every model feature.
+      const initialValues: FeatureValues = {};
+
+      requiredFeatures.forEach((feature) => {
+        initialValues[feature] = "";
+      });
+
+      setValues(initialValues);
+    } catch (err) {
+      console.error(
+        "Unable to load required features:",
+        err
+      );
+
+      setError(
+        err instanceof Error
+          ? err.message
+          : "Unable to load required features."
+      );
+    } finally {
+      setLoadingFeatures(false);
+    }
+  };
+
+  /* =======================================================
+     LOAD WHEN MODAL OPENS
+     ======================================================= */
 
   useEffect(() => {
     if (!open) {
-      setPhase("idle"); setStep(0); setResult(null);
-      setUploadProg(null); setFileName(null); setTab("quick");
+      return;
     }
+
+    setPrediction(null);
+    setSuccessMessage(null);
+    setError(null);
+
+    loadFeatures();
   }, [open]);
 
-  useEffect(() => {
-    if (phase !== "running") return;
-    setStep(0);
-    const id = setInterval(() => {
-      setStep((s) => {
-        if (s >= ANALYSIS_STEPS.length - 1) {
-          clearInterval(id);
-          setTimeout(() => {
-            setResult(buildResult(fields));
-            setPhase("result");
-          }, 350);
-          return s;
-        }
-        return s + 1;
-      });
-    }, 380);
-    return () => clearInterval(id);
-  }, [phase, fields]);
+  /* =======================================================
+     UPDATE FEATURE VALUE
+     ======================================================= */
 
-  const set = (k: keyof typeof fields, v: string) => setFields((f) => ({ ...f, [k]: v }));
+  const handleFeatureChange = (
+    feature: string,
+    value: string
+  ) => {
+    setValues((previous) => ({
+      ...previous,
+      [feature]: value,
+    }));
+
+    setError(null);
+    setSuccessMessage(null);
+  };
+
+  /* =======================================================
+     CLEAR ALL VALUES
+     ======================================================= */
+
+  const clearValues = () => {
+    const emptyValues: FeatureValues = {};
+
+    features.forEach((feature) => {
+      emptyValues[feature] = "";
+    });
+
+    setValues(emptyValues);
+    setPrediction(null);
+    setError(null);
+    setSuccessMessage(null);
+  };
+
+  /* =======================================================
+     CHECK HOW MANY VALUES ARE FILLED
+     ======================================================= */
+
+  const filledCount = useMemo(() => {
+    return features.filter(
+      (feature) =>
+        values[feature] !== undefined &&
+        values[feature] !== ""
+    ).length;
+  }, [features, values]);
+
+  /* =======================================================
+     PREDICT
+     ======================================================= */
+
+  const handlePredict = async () => {
+    setError(null);
+    setSuccessMessage(null);
+    setPrediction(null);
+
+    if (features.length === 0) {
+      setError(
+        "No model features were loaded. Please refresh the feature list."
+      );
+      return;
+    }
+
+    /* -------------------------------------------------------
+       Check empty fields
+       ------------------------------------------------------- */
+
+    const missingFeatures = features.filter(
+      (feature) =>
+        values[feature] === undefined ||
+        values[feature] === ""
+    );
+
+    if (missingFeatures.length > 0) {
+      setError(
+        `Please enter values for all ${missingFeatures.length} missing feature(s).`
+      );
+
+      return;
+    }
+
+    /* -------------------------------------------------------
+       Convert strings to numbers
+       ------------------------------------------------------- */
+
+    const numericFeatures: Record<string, number> = {};
+
+    for (const feature of features) {
+      const rawValue = values[feature];
+
+      const numericValue = Number(rawValue);
+
+      if (!Number.isFinite(numericValue)) {
+        setError(
+          `${formatFeatureName(
+            feature
+          )} must contain a valid number.`
+        );
+
+        return;
+      }
+
+      numericFeatures[feature] = numericValue;
+    }
+
+    /* -------------------------------------------------------
+       Send prediction request
+       ------------------------------------------------------- */
+
+    setPredicting(true);
+
+    try {
+      const result =
+        await predictAttack(numericFeatures);
+
+      if (result.data) {
+        setPrediction(result.data);
+      }
+
+      setSuccessMessage(
+        result.message ||
+          "Prediction completed successfully."
+      );
+    } catch (err) {
+      console.error("Prediction error:", err);
+
+      setError(
+        err instanceof Error
+          ? err.message
+          : "Prediction failed."
+      );
+    } finally {
+      setPredicting(false);
+    }
+  };
+
+  /* =======================================================
+     RISK CLASS
+     ======================================================= */
+
+  const getRiskClass = (risk?: string) => {
+    if (!risk) {
+      return "text-cyan-400";
+    }
+
+    const normalized = risk.toLowerCase();
+
+    if (
+      normalized.includes("critical") ||
+      normalized.includes("high")
+    ) {
+      return "text-red-400";
+    }
+
+    if (normalized.includes("medium")) {
+      return "text-yellow-400";
+    }
+
+    if (
+      normalized.includes("low") ||
+      normalized.includes("safe")
+    ) {
+      return "green-400";
+    }
+
+    return "text-cyan-400";
+  };
+
+  /* =======================================================
+     DON'T RENDER WHEN CLOSED
+     ======================================================= */
+
+  if (!open) {
+    return null;
+  }
+
+  /* =======================================================
+     UI
+     ======================================================= */
 
   return (
     <AnimatePresence>
       {open && (
         <motion.div
-          initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
-          className="fixed inset-0 z-50 flex items-center justify-center p-4"
+          className="fixed inset-0 z-[9999] flex items-center justify-center bg-black/70 backdrop-blur-sm p-4"
+          initial={{ opacity: 0 }}
+          animate={{ opacity: 1 }}
+          exit={{ opacity: 0 }}
+          onMouseDown={(event) => {
+            if (event.target === event.currentTarget) {
+              onClose();
+            }
+          }}
         >
-          <div className="absolute inset-0 bg-black/70 backdrop-blur-sm" onClick={onClose} />
           <motion.div
-            initial={{ scale: 0.95, y: 20, opacity: 0 }}
-            animate={{ scale: 1, y: 0, opacity: 1 }}
-            exit={{ scale: 0.97, opacity: 0 }}
-            transition={{ duration: 0.4, ease: [0.22, 1, 0.36, 1] }}
-            className="relative w-full max-w-4xl max-h-[92vh] overflow-hidden rounded-2xl"
+            initial={{
+              opacity: 0,
+              scale: 0.95,
+              y: 20,
+            }}
+            animate={{
+              opacity: 1,
+              scale: 1,
+              y: 0,
+            }}
+            exit={{
+              opacity: 0,
+              scale: 0.95,
+              y: 20,
+            }}
+            transition={{
+              duration: 0.25,
+            }}
+            className="relative w-full max-w-6xl max-h-[92vh] overflow-hidden rounded-2xl border border-cyan-500/20 bg-slate-950 shadow-[0_0_80px_rgba(0,200,255,0.15)]"
           >
-            <div className="absolute -inset-[1px] rounded-2xl bg-gradient-to-br from-cyan/60 via-transparent to-fuchsia-500/40 opacity-70 blur-[2px]" />
-            <div className="relative glass rounded-2xl border border-cyan/30 flex flex-col max-h-[92vh]">
-              {/* Header */}
-              <div className="flex items-center justify-between border-b border-cyan/15 px-5 py-3">
-                <div className="flex items-center gap-3">
-                  <div className="h-8 w-8 rounded-md border border-cyan/40 bg-cyan/10 flex items-center justify-center">
-                    <ShieldAlert className="h-4 w-4 text-cyan" />
+            {/* =================================================
+                HEADER
+            ================================================= */}
+
+            <div className="flex items-center justify-between border-b border-white/10 px-6 py-4">
+              <div className="flex items-center gap-3">
+                <div className="flex h-11 w-11 items-center justify-center rounded-xl border border-cyan-500/30 bg-cyan-500/10">
+                  <Network className="h-5 w-5 text-cyan-400" />
+                </div>
+
+                <div>
+                  <h2 className="text-lg font-semibold text-white">
+                    Network Analysis
+                  </h2>
+
+                  <p className="text-xs text-slate-400">
+                    AI-powered network intrusion detection
+                  </p>
+                </div>
+              </div>
+
+              <button
+                type="button"
+                onClick={onClose}
+                className="rounded-lg p-2 text-slate-400 transition hover:bg-white/10 hover:text-white"
+              >
+                <X className="h-5 w-5" />
+              </button>
+            </div>
+
+            {/* =================================================
+                BODY
+            ================================================= */}
+
+            <div className="max-h-[calc(92vh-145px)] overflow-y-auto p-6">
+              {/* ===============================================
+                  ERROR
+              =============================================== */}
+
+              {error && (
+                <motion.div
+                  initial={{ opacity: 0, y: -10 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  className="mb-5 flex items-start gap-3 rounded-xl border border-red-500/30 bg-red-500/10 p-4"
+                >
+                  <AlertCircle className="mt-0.5 h-5 w-5 shrink-0 text-red-400" />
+
+                  <div className="min-w-0 flex-1">
+                    <p className="text-sm font-medium text-red-300">
+                      Error
+                    </p>
+
+                    <p className="mt-1 whitespace-pre-wrap text-xs text-red-200/80">
+                      {error}
+                    </p>
                   </div>
-                  <div>
-                    <div className="text-[10px] uppercase tracking-[0.4em] text-muted-foreground">AI Terminal</div>
-                    <div className="text-sm font-light text-glow" style={{ fontFamily: "Orbitron" }}>
-                      NETWORK THREAT ANALYSIS
+
+                  <button
+                    type="button"
+                    onClick={() => setError(null)}
+                    className="text-red-300 hover:text-white"
+                  >
+                    <X className="h-4 w-4" />
+                  </button>
+                </motion.div>
+              )}
+
+              {/* ===============================================
+                  SUCCESS
+              =============================================== */}
+
+              {successMessage && (
+                <motion.div
+                  initial={{ opacity: 0, y: -10 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  className="mb-5 flex items-center gap-3 rounded-xl border border-green-500/30 bg-green-500/10 p-4"
+                >
+                  <CheckCircle2 className="h-5 w-5 text-green-400" />
+
+                  <p className="text-sm text-green-300">
+                    {successMessage}
+                  </p>
+                </motion.div>
+              )}
+
+              {/* ===============================================
+                  LOADING FEATURES
+              =============================================== */}
+
+              {loadingFeatures ? (
+                <div className="flex min-h-[400px] flex-col items-center justify-center">
+                  <Loader2 className="h-10 w-10 animate-spin text-cyan-400" />
+
+                  <p className="mt-4 text-sm text-slate-300">
+                    Loading model features...
+                  </p>
+
+                  <p className="mt-1 text-xs text-slate-500">
+                    Getting the required features from
+                    CyberGuardAI
+                  </p>
+                </div>
+              ) : (
+                <>
+                  {/* =============================================
+                      TOP STATS
+                  ============================================= */}
+
+                  <div className="mb-6 grid grid-cols-1 gap-3 sm:grid-cols-3">
+                    <div className="rounded-xl border border-white/10 bg-white/[0.03] p-4">
+                      <div className="flex items-center gap-2">
+                        <Activity className="h-4 w-4 text-cyan-400" />
+
+                        <span className="text-xs text-slate-400">
+                          Model Features
+                        </span>
+                      </div>
+
+                      <p className="mt-2 text-xl font-semibold text-white">
+                        {features.length}
+                      </p>
+                    </div>
+
+                    <div className="rounded-xl border border-white/10 bg-white/[0.03] p-4">
+                      <div className="flex items-center gap-2">
+                        <Zap className="h-4 w-4 text-yellow-400" />
+
+                        <span className="text-xs text-slate-400">
+                          Values Entered
+                        </span>
+                      </div>
+
+                      <p className="mt-2 text-xl font-semibold text-white">
+                        {filledCount}
+                        <span className="ml-1 text-sm text-slate-500">
+                          / {features.length}
+                        </span>
+                      </p>
+                    </div>
+
+                    <div className="rounded-xl border border-white/10 bg-white/[0.03] p-4">
+                      <div className="flex items-center gap-2">
+                        <ShieldAlert className="h-4 w-4 text-green-400" />
+
+                        <span className="text-xs text-slate-400">
+                          Authentication
+                        </span>
+                      </div>
+
+                      <p className="mt-2 text-sm font-medium text-green-400">
+                        JWT Authenticated
+                      </p>
                     </div>
                   </div>
-                </div>
-                <button onClick={onClose} className="rounded-md border border-cyan/20 p-1.5 hover:border-cyan/60">
-                  <X className="h-4 w-4 text-cyan" />
-                </button>
-              </div>
 
-              {/* Tabs */}
-              <div className="flex gap-1 border-b border-cyan/10 px-3 py-2">
-                {([
-                  ["quick", "Quick Analysis", Zap],
-                  ["upload", "Upload CSV", Upload],
-                  ["live", "Live Monitoring", Radio],
-                ] as const).map(([id, label, Icon]) => (
-                  <button
-                    key={id} onClick={() => setTab(id)}
-                    className={`flex items-center gap-2 rounded-md px-3 py-1.5 text-xs uppercase tracking-widest font-mono transition ${
-                      tab === id ? "border border-cyan/50 bg-cyan/10 text-cyan" : "border border-transparent text-muted-foreground hover:text-cyan"
-                    }`}
-                  >
-                    <Icon className="h-3.5 w-3.5" /> {label}
-                  </button>
-                ))}
-              </div>
+                  {/* =============================================
+                      FEATURE SECTION
+                  ============================================= */}
 
-              {/* Body */}
-              <div className="overflow-y-auto p-5">
-                <AnimatePresence mode="wait">
-                  {phase === "running" && (
-                    <RunningView key="run" step={step} />
-                  )}
-                  {phase === "result" && result && (
-                    <ResultView key="res" r={result} onClose={onClose} onAgain={() => { setFields(DEFAULTS()); setPhase("idle"); }} />
-                  )}
-                  {phase === "idle" && tab === "quick" && (
-                    <motion.div key="quick" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="space-y-4">
-                      <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
-                        <Select label="Protocol" value={fields.protocol} options={PROTOCOLS} onChange={(v) => set("protocol", v)} />
-                        <Input label="Destination Port" value={fields.dstPort} onChange={(v) => set("dstPort", v)} />
-                        <Input label="Flow Duration (µs)" value={fields.flowDuration} onChange={(v) => set("flowDuration", v)} />
-                        <Input label="Packet Length" value={fields.packetLength} onChange={(v) => set("packetLength", v)} />
-                        <Input label="Total Fwd Packets" value={fields.fwdPackets} onChange={(v) => set("fwdPackets", v)} />
-                        <Input label="Total Bwd Packets" value={fields.bwdPackets} onChange={(v) => set("bwdPackets", v)} />
-                        <Input label="Flow Bytes / sec" value={fields.flowBytesPerSec} onChange={(v) => set("flowBytesPerSec", v)} />
-                        <Input label="SYN Flag Count" value={fields.syn} onChange={(v) => set("syn", v)} />
-                        <Input label="ACK Flag Count" value={fields.ack} onChange={(v) => set("ack", v)} />
-                        <Input label="FIN Flag Count" value={fields.fin} onChange={(v) => set("fin", v)} />
-                        <Input label="RST Flag Count" value={fields.rst} onChange={(v) => set("rst", v)} />
-                        <Input label="URG Flag Count" value={fields.urg} onChange={(v) => set("urg", v)} />
+                  {features.length > 0 ? (
+                    <div>
+                      <div className="mb-4 flex items-center justify-between">
+                        <div>
+                          <h3 className="text-sm font-semibold text-white">
+                            Network Flow Features
+                          </h3>
+
+                          <p className="mt-1 text-xs text-slate-500">
+                            Enter the values required by your
+                            trained intrusion detection model.
+                          </p>
+                        </div>
+
+                        <button
+                          type="button"
+                          onClick={clearValues}
+                          className="flex items-center gap-2 rounded-lg border border-white/10 px-3 py-2 text-xs text-slate-400 transition hover:bg-white/5 hover:text-white"
+                        >
+                          <RefreshCw className="h-3.5 w-3.5" />
+
+                          Clear
+                        </button>
                       </div>
+
+                      <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3">
+                        {features.map((feature, index) => (
+                          <motion.div
+                            key={feature}
+                            initial={{
+                              opacity: 0,
+                              y: 10,
+                            }}
+                            animate={{
+                              opacity: 1,
+                              y: 0,
+                            }}
+                            transition={{
+                              delay:
+                                Math.min(
+                                  index * 0.015,
+                                  0.5
+                                ),
+                            }}
+                          >
+                            <label className="mb-1.5 block text-[11px] font-medium uppercase tracking-wide text-slate-400">
+                              {formatFeatureName(feature)}
+                            </label>
+
+                            <input
+                              type="number"
+                              step="any"
+                              value={
+                                values[feature] ?? ""
+                              }
+                              onChange={(event) =>
+                                handleFeatureChange(
+                                  feature,
+                                  event.target.value
+                                )
+                              }
+                              placeholder="Enter value"
+                              className="w-full rounded-lg border border-white/10 bg-white/[0.04] px-3 py-2.5 text-sm text-white outline-none transition placeholder:text-slate-600 focus:border-cyan-500/50 focus:bg-cyan-500/[0.03] focus:ring-1 focus:ring-cyan-500/30"
+                            />
+                          </motion.div>
+                        ))}
+                      </div>
+                    </div>
+                  ) : (
+                    <div className="flex min-h-[250px] flex-col items-center justify-center rounded-xl border border-dashed border-white/10">
+                      <Network className="h-10 w-10 text-slate-600" />
+
+                      <p className="mt-3 text-sm text-slate-400">
+                        No features loaded
+                      </p>
+
                       <button
-                        onClick={() => setPhase("running")}
-                        className="mt-2 flex w-full items-center justify-center gap-2 rounded-md border border-cyan/50 bg-cyan/10 py-3 text-sm uppercase tracking-[0.3em] text-cyan hover:bg-cyan/20 transition"
-                        style={{ fontFamily: "Orbitron" }}
+                        type="button"
+                        onClick={loadFeatures}
+                        className="mt-4 flex items-center gap-2 rounded-lg border border-cyan-500/30 bg-cyan-500/10 px-4 py-2 text-xs text-cyan-300 transition hover:bg-cyan-500/20"
                       >
-                        <Cpu className="h-4 w-4" /> Analyze Threat
+                        <RefreshCw className="h-3.5 w-3.5" />
+                        Load Features
                       </button>
+                    </div>
+                  )}
+
+                  {/* =============================================
+                      PREDICTION RESULT
+                  ============================================= */}
+
+                  {prediction && (
+                    <motion.div
+                      initial={{
+                        opacity: 0,
+                        y: 15,
+                      }}
+                      animate={{
+                        opacity: 1,
+                        y: 0,
+                      }}
+                      className="mt-6 overflow-hidden rounded-xl border border-cyan-500/20 bg-cyan-500/[0.03]"
+                    >
+                      <div className="border-b border-white/10 px-5 py-4">
+                        <div className="flex items-center gap-2">
+                          <ShieldAlert className="h-5 w-5 text-cyan-400" />
+
+                          <h3 className="text-sm font-semibold text-white">
+                            Analysis Result
+                          </h3>
+                        </div>
+                      </div>
+
+                      <div className="grid grid-cols-1 gap-4 p-5 sm:grid-cols-2 lg:grid-cols-4">
+                        {/* Attack */}
+                        <div>
+                          <p className="text-[10px] uppercase tracking-wider text-slate-500">
+                            Prediction
+                          </p>
+
+                          <p className="mt-1 text-base font-semibold text-white">
+                            {prediction.predicted_attack ||
+                              "Unknown"}
+                          </p>
+                        </div>
+
+                        {/* Confidence */}
+                        <div>
+                          <p className="text-[10px] uppercase tracking-wider text-slate-500">
+                            Confidence
+                          </p>
+
+                          <p className="mt-1 text-base font-semibold text-cyan-400">
+                            {typeof prediction.confidence ===
+                            "number"
+                              ? `${(
+                                  prediction.confidence > 1
+                                    ? prediction.confidence
+                                    : prediction.confidence *
+                                      100
+                                ).toFixed(2)}%`
+                              : "N/A"}
+                          </p>
+                        </div>
+
+                        {/* Risk */}
+                        <div>
+                          <p className="text-[10px] uppercase tracking-wider text-slate-500">
+                            Risk Level
+                          </p>
+
+                          <p
+                            className={`mt-1 text-base font-semibold ${getRiskClass(
+                              prediction.risk_level
+                            )}`}
+                          >
+                            {prediction.risk_level ||
+                              "Unknown"}
+                          </p>
+                        </div>
+
+                        {/* Is Attack */}
+                        <div>
+                          <p className="text-[10px] uppercase tracking-wider text-slate-500">
+                            Status
+                          </p>
+
+                          <div className="mt-1 flex items-center gap-2">
+                            {prediction.is_attack ? (
+                              <>
+                                <span className="h-2 w-2 animate-pulse rounded-full bg-red-400" />
+
+                                <span className="text-sm font-semibold text-red-400">
+                                  Attack Detected
+                                </span>
+                              </>
+                            ) : (
+                              <>
+                                <span className="h-2 w-2 rounded-full bg-green-400" />
+
+                                <span className="text-sm font-semibold text-green-400">
+                                  Benign
+                                </span>
+                              </>
+                            )}
+                          </div>
+                        </div>
+                      </div>
+
+                      {/* Recommendation */}
+                      {prediction.recommendation && (
+                        <div className="border-t border-white/10 px-5 py-4">
+                          <p className="text-[10px] uppercase tracking-wider text-slate-500">
+                            Recommendation
+                          </p>
+
+                          <p className="mt-2 text-sm leading-6 text-slate-300">
+                            {prediction.recommendation}
+                          </p>
+                        </div>
+                      )}
                     </motion.div>
                   )}
-                  {phase === "idle" && tab === "upload" && (
-                    <UploadView
-                      key="upload"
-                      fileName={fileName} setFileName={setFileName}
-                      progress={uploadProg} setProgress={setUploadProg}
-                    />
+                </>
+              )}
+            </div>
+
+            {/* =================================================
+                FOOTER
+            ================================================= */}
+
+            <div className="flex items-center justify-between border-t border-white/10 bg-black/20 px-6 py-4">
+              <div className="text-xs text-slate-500">
+                {features.length > 0
+                  ? `${filledCount} of ${features.length} features entered`
+                  : "Waiting for model features..."}
+              </div>
+
+              <div className="flex items-center gap-3">
+                <button
+                  type="button"
+                  onClick={onClose}
+                  className="rounded-lg border border-white/10 px-4 py-2.5 text-sm text-slate-300 transition hover:bg-white/5 hover:text-white"
+                >
+                  Close
+                </button>
+
+                <button
+                  type="button"
+                  onClick={handlePredict}
+                  disabled={
+                    predicting ||
+                    loadingFeatures ||
+                    features.length === 0
+                  }
+                  className="flex items-center gap-2 rounded-lg bg-cyan-500 px-5 py-2.5 text-sm font-semibold text-slate-950 transition hover:bg-cyan-400 disabled:cursor-not-allowed disabled:opacity-50"
+                >
+                  {predicting ? (
+                    <>
+                      <Loader2 className="h-4 w-4 animate-spin" />
+                      Analyzing...
+                    </>
+                  ) : (
+                    <>
+                      <Play className="h-4 w-4" />
+                      Analyze Network
+                    </>
                   )}
-                  {phase === "idle" && tab === "live" && (
-                    <ComingSoon key="live" />
-                  )}
-                </AnimatePresence>
+                </button>
               </div>
             </div>
           </motion.div>
         </motion.div>
       )}
     </AnimatePresence>
-  );
-}
-
-function Input({ label, value, onChange }: { label: string; value: string; onChange: (v: string) => void }) {
-  return (
-    <label className="block">
-      <div className="text-[10px] uppercase tracking-[0.25em] text-muted-foreground mb-1 font-mono">{label}</div>
-      <input
-        value={value} onChange={(e) => onChange(e.target.value)}
-        className="w-full rounded border border-cyan/20 bg-black/30 px-2.5 py-2 text-sm font-mono text-cyan outline-none focus:border-cyan/60"
-      />
-    </label>
-  );
-}
-
-function Select({ label, value, options, onChange }: { label: string; value: string; options: string[]; onChange: (v: string) => void }) {
-  return (
-    <label className="block">
-      <div className="text-[10px] uppercase tracking-[0.25em] text-muted-foreground mb-1 font-mono">{label}</div>
-      <select
-        value={value} onChange={(e) => onChange(e.target.value)}
-        className="w-full rounded border border-cyan/20 bg-black/30 px-2.5 py-2 text-sm font-mono text-cyan outline-none focus:border-cyan/60"
-      >
-        {options.map((o) => <option key={o} className="bg-[#06070A]">{o}</option>)}
-      </select>
-    </label>
-  );
-}
-
-function RunningView({ step }: { step: number }) {
-  return (
-    <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="py-6">
-      <div className="text-center mb-6">
-        <div className="text-[10px] uppercase tracking-[0.5em] text-cyan/80">Neural Inference</div>
-        <div className="mt-1 text-lg font-light text-glow" style={{ fontFamily: "Orbitron" }}>PROCESSING</div>
-      </div>
-      <div className="mx-auto max-w-md space-y-2 font-mono text-sm">
-        {ANALYSIS_STEPS.map((s, i) => (
-          <div key={s}
-            className={`flex items-center gap-3 rounded border border-cyan/15 bg-black/30 px-3 py-2 ${i <= step ? "text-safe" : "text-muted-foreground"}`}>
-            <span className={`h-1.5 w-1.5 rounded-full ${i < step ? "bg-safe" : i === step ? "bg-cyan animate-pulse" : "bg-muted"}`} />
-            {s}
-            {i < step && <CheckCircle2 className="ml-auto h-3.5 w-3.5 text-safe" />}
-            {i === step && <span className="ml-auto text-cyan animate-pulse">●●●</span>}
-          </div>
-        ))}
-      </div>
-      <div className="mx-auto mt-6 h-[2px] max-w-md overflow-hidden rounded bg-white/5">
-        <motion.div className="h-full bg-gradient-to-r from-cyan via-fuchsia-500 to-cyan"
-          initial={{ width: "0%" }} animate={{ width: `${((step + 1) / ANALYSIS_STEPS.length) * 100}%` }} />
-      </div>
-    </motion.div>
-  );
-}
-
-function buildResult(f: ReturnType<typeof DEFAULTS>) {
-  const safe = Math.random() < 0.35;
-  if (safe) {
-    return {
-      safe: true, prediction: "Normal Traffic", confidence: 98.7,
-      severity: "Safe", risk: 6,
-      recommendation: "No suspicious activity detected. Continue monitoring.",
-      features: ["Balanced Fwd/Bwd Ratio", "Normal Packet Length", "Standard Flow Duration", "Common Destination Port"],
-      srcIp: "10.0.14." + Math.floor(Math.random() * 250),
-      dstIp: "192.168.10." + Math.floor(Math.random() * 250),
-      protocol: f.protocol,
-    };
-  }
-  const kinds = ["DDoS Attack", "Port Scan", "Brute Force", "Botnet Beacon", "SQL Injection"];
-  const kind = kinds[Math.floor(Math.random() * kinds.length)];
-  return {
-    safe: false, prediction: kind,
-    confidence: +(96 + Math.random() * 3.5).toFixed(2),
-    severity: "Critical", risk: Math.floor(90 + Math.random() * 9),
-    recommendation: `High probability ${kind} detected. Immediately isolate source device. Inspect incoming traffic. Apply firewall rules.`,
-    features: ["High SYN Count", "Abnormal Packet Length", "Large Flow Duration", "Destination Port " + f.dstPort],
-    srcIp: "192.168.10." + Math.floor(Math.random() * 250),
-    dstIp: "104.26.15." + Math.floor(Math.random() * 250),
-    protocol: f.protocol,
-  };
-}
-
-function ResultView({
-  r, onClose, onAgain,
-}: { r: ReturnType<typeof buildResult>; onClose: () => void; onAgain: () => void }) {
-  const isSafe = r.safe;
-  const accent = isSafe ? "safe" : "danger";
-  return (
-    <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0 }} className="space-y-4">
-      <div className={`relative overflow-hidden rounded-xl border p-5 ${isSafe ? "border-safe/40 bg-safe/5" : "border-danger/40 bg-danger/5"}`}>
-        <div className="absolute inset-0 pointer-events-none opacity-20"
-          style={{ background: "repeating-linear-gradient(90deg, transparent 0 20px, rgba(255,255,255,0.03) 20px 21px)" }} />
-        <div className="flex items-start gap-4">
-          <div className={`flex h-14 w-14 items-center justify-center rounded-lg border ${isSafe ? "border-safe/50 bg-safe/10" : "border-danger/50 bg-danger/10"}`}>
-            {isSafe
-              ? <ShieldCheck className="h-7 w-7 text-safe" />
-              : <ShieldAlert className="h-7 w-7 text-danger" />}
-          </div>
-          <div className="flex-1">
-            <div className="text-[10px] uppercase tracking-[0.4em] text-muted-foreground">Prediction</div>
-            <div className={`text-2xl font-light text-glow ${isSafe ? "text-safe" : "text-danger"}`} style={{ fontFamily: "Orbitron" }}>
-              {r.prediction}
-            </div>
-            <div className="mt-1 text-xs font-mono text-muted-foreground">Timestamp · {new Date().toLocaleString()}</div>
-          </div>
-          <div className="text-right">
-            <div className="text-[10px] uppercase tracking-[0.3em] text-muted-foreground">Severity</div>
-            <div className={`text-lg font-mono ${isSafe ? "text-safe" : "text-danger"}`}>{r.severity}</div>
-          </div>
-        </div>
-
-        <div className="mt-4 grid grid-cols-2 gap-3 sm:grid-cols-4">
-          <Stat label="Confidence" value={`${r.confidence}%`} accent={accent} />
-          <Stat label="Risk Score" value={`${r.risk}/100`} accent={accent} />
-          <Stat label="Protocol" value={r.protocol} accent={accent} />
-          <Stat label="Src → Dst" value={`${r.srcIp} → ${r.dstIp}`} mono accent={accent} />
-        </div>
-      </div>
-
-      <div className="grid gap-3 md:grid-cols-2">
-        <div className="rounded-lg border border-cyan/20 p-4">
-          <div className="text-[10px] uppercase tracking-[0.3em] text-cyan/80 mb-2">Recommendation</div>
-          <p className="text-sm font-mono text-foreground/90 leading-relaxed">{r.recommendation}</p>
-        </div>
-        <div className="rounded-lg border border-cyan/20 p-4">
-          <div className="text-[10px] uppercase tracking-[0.3em] text-cyan/80 mb-2">Feature Importance</div>
-          <ul className="space-y-1.5 text-xs font-mono">
-            {r.features.map((f, i) => (
-              <li key={f} className="flex items-center justify-between gap-3">
-                <span className="text-foreground/80">{f}</span>
-                <span className="flex-1 mx-2 h-1 rounded bg-white/5 overflow-hidden">
-                  <motion.span
-                    initial={{ width: 0 }} animate={{ width: `${90 - i * 15}%` }} transition={{ duration: 0.6, delay: i * 0.1 }}
-                    className={`block h-full ${isSafe ? "bg-safe" : "bg-danger"}`}
-                  />
-                </span>
-              </li>
-            ))}
-          </ul>
-        </div>
-      </div>
-
-      <div className="flex flex-wrap justify-end gap-2 pt-2">
-        <button onClick={onClose} className="rounded-md border border-cyan/20 px-4 py-2 text-xs uppercase tracking-widest font-mono text-muted-foreground hover:text-cyan hover:border-cyan/40">
-          Close
-        </button>
-        <button onClick={() => downloadReport(r)} className="flex items-center gap-2 rounded-md border border-cyan/30 px-4 py-2 text-xs uppercase tracking-widest font-mono text-cyan hover:bg-cyan/10">
-          <Download className="h-3.5 w-3.5" /> Download Report
-        </button>
-        <button onClick={onAgain} className="flex items-center gap-2 rounded-md border border-cyan/50 bg-cyan/10 px-4 py-2 text-xs uppercase tracking-widest font-mono text-cyan hover:bg-cyan/20">
-          <RefreshCw className="h-3.5 w-3.5" /> Run Another Analysis
-        </button>
-      </div>
-    </motion.div>
-  );
-}
-
-function Stat({ label, value, mono, accent }: { label: string; value: string; mono?: boolean; accent: "safe" | "danger" }) {
-  return (
-    <div className={`rounded border p-3 ${accent === "safe" ? "border-safe/30" : "border-danger/30"}`}>
-      <div className="text-[10px] uppercase tracking-[0.25em] text-muted-foreground">{label}</div>
-      <div className={`mt-1 ${mono ? "text-xs" : "text-lg"} font-mono ${accent === "safe" ? "text-safe" : "text-danger"} truncate`}>{value}</div>
-    </div>
-  );
-}
-
-function downloadReport(r: ReturnType<typeof buildResult>) {
-  const body = `CYBERGUARD AI — THREAT ANALYSIS REPORT
-Generated: ${new Date().toISOString()}
-========================================
-Prediction : ${r.prediction}
-Confidence : ${r.confidence}%
-Severity   : ${r.severity}
-Risk Score : ${r.risk}/100
-Protocol   : ${r.protocol}
-Source IP  : ${r.srcIp}
-Dest   IP  : ${r.dstIp}
-
-Recommendation:
-${r.recommendation}
-
-Top Features:
-${r.features.map((f, i) => `  ${i + 1}. ${f}`).join("\n")}
-`;
-  const blob = new Blob([body], { type: "text/plain" });
-  const url = URL.createObjectURL(blob);
-  const a = document.createElement("a");
-  a.href = url; a.download = `cyberguard-report-${Date.now()}.txt`;
-  a.click(); URL.revokeObjectURL(url);
-}
-
-function UploadView({
-  fileName, setFileName, progress, setProgress,
-}: {
-  fileName: string | null; setFileName: (s: string | null) => void;
-  progress: number | null; setProgress: (p: number | null) => void;
-}) {
-  const [drag, setDrag] = useState(false);
-  const [done, setDone] = useState(false);
-
-  const start = (name: string) => {
-    setFileName(name); setDone(false); setProgress(0);
-    let p = 0;
-    const id = setInterval(() => {
-      p += 4 + Math.random() * 8;
-      if (p >= 100) { p = 100; clearInterval(id); setTimeout(() => setDone(true), 400); }
-      setProgress(p);
-    }, 120);
-  };
-
-  return (
-    <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="space-y-4">
-      <div
-        onDragOver={(e) => { e.preventDefault(); setDrag(true); }}
-        onDragLeave={() => setDrag(false)}
-        onDrop={(e) => {
-          e.preventDefault(); setDrag(false);
-          const f = e.dataTransfer.files?.[0]; if (f) start(f.name);
-        }}
-        className={`relative flex flex-col items-center justify-center rounded-xl border-2 border-dashed py-14 transition-colors ${drag ? "border-cyan bg-cyan/10" : "border-cyan/30 bg-black/20"}`}
-      >
-        <motion.div
-          animate={{ y: [0, -6, 0] }} transition={{ duration: 2, repeat: Infinity }}
-          className="mb-4 flex h-16 w-16 items-center justify-center rounded-full border border-cyan/40 bg-cyan/10"
-        >
-          <Upload className="h-7 w-7 text-cyan" />
-        </motion.div>
-        <div className="text-sm font-mono text-cyan">Drop a CSV file here</div>
-        <div className="mt-1 text-xs text-muted-foreground font-mono">or</div>
-        <label className="mt-2 cursor-pointer rounded-md border border-cyan/40 px-3 py-1.5 text-xs uppercase tracking-widest font-mono text-cyan hover:bg-cyan/10">
-          Browse Files
-          <input type="file" accept=".csv" hidden onChange={(e) => {
-            const f = e.target.files?.[0]; if (f) start(f.name);
-          }} />
-        </label>
-        <div className="mt-3 text-[10px] font-mono text-muted-foreground">Accepted: .csv · Max 50MB</div>
-      </div>
-
-      {fileName && (
-        <div className="rounded-lg border border-cyan/20 bg-black/30 p-4">
-          <div className="flex items-center gap-3">
-            <FileText className="h-4 w-4 text-cyan" />
-            <div className="flex-1 min-w-0">
-              <div className="truncate text-sm font-mono text-cyan">{fileName}</div>
-              <div className="mt-1.5 h-1 w-full overflow-hidden rounded bg-white/5">
-                <motion.div className="h-full bg-gradient-to-r from-cyan to-fuchsia-500"
-                  animate={{ width: `${progress ?? 0}%` }} />
-              </div>
-            </div>
-            <span className="text-xs font-mono text-cyan w-10 text-right">{Math.round(progress ?? 0)}%</span>
-          </div>
-          {done && (
-            <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }}
-              className="mt-3 flex items-center gap-2 rounded border border-safe/40 bg-safe/5 px-3 py-2 text-xs font-mono text-safe">
-              <CheckCircle2 className="h-4 w-4" /> File processed · 12,483 flows analyzed · 3 anomalies flagged
-            </motion.div>
-          )}
-        </div>
-      )}
-    </motion.div>
-  );
-}
-
-function ComingSoon() {
-  const bars = useMemo(() => Array.from({ length: 40 }, () => 20 + Math.random() * 60), []);
-  return (
-    <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="py-6">
-      <div className="mx-auto max-w-xl text-center">
-        <div className="mx-auto mb-4 flex h-16 w-16 items-center justify-center rounded-full border border-cyan/40 bg-cyan/10">
-          <Radio className="h-7 w-7 text-cyan animate-pulse" />
-        </div>
-        <div className="text-[10px] uppercase tracking-[0.5em] text-cyan/80">Live Packet Sniffing</div>
-        <div className="mt-1 text-2xl font-light text-glow" style={{ fontFamily: "Orbitron" }}>COMING SOON</div>
-        <p className="mt-3 text-sm text-muted-foreground font-mono">
-          Real-time AI monitoring powered by Scapy · zero-latency anomaly detection · adaptive neural triage.
-        </p>
-        <div className="mt-6 flex h-24 items-end justify-center gap-1 rounded-lg border border-cyan/20 bg-black/30 p-3">
-          {bars.map((h, i) => (
-            <motion.span key={i}
-              className="w-1.5 rounded-sm bg-gradient-to-t from-cyan/40 to-cyan"
-              animate={{ height: [`${h}%`, `${20 + Math.random() * 70}%`, `${h}%`] }}
-              transition={{ duration: 1.4 + Math.random(), repeat: Infinity, delay: i * 0.03 }}
-            />
-          ))}
-        </div>
-        <div className="mt-4 flex items-center justify-center gap-2 text-xs font-mono text-cyan/70">
-          <Activity className="h-3.5 w-3.5" /> Interface awaiting kernel bridge…
-        </div>
-      </div>
-    </motion.div>
   );
 }
