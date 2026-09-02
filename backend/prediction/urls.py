@@ -10,6 +10,7 @@ from .views import (
     DashboardUserStatsView,
     PredictAttackView,
     RequiredFeaturesView,
+    PDFPredictionView,
 )
 
 urlpatterns = [
@@ -58,4 +59,9 @@ urlpatterns = [
         DashboardUserStatsView.as_view(),
         name="dashboard-user-stats",
     ),
+    path(
+    "predict/pdf/",
+    PDFPredictionView.as_view(),
+    name="predict-pdf",
+),
 ]
