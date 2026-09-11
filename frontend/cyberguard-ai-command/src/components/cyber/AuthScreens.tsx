@@ -242,6 +242,13 @@ export function SignupScreen({
           <Field icon={User} placeholder="First Name" value={firstName} onChange={setFirstName} />
           <Field icon={User} placeholder="Last Name" value={lastName} onChange={setLastName} />
         </div>
+        <Field
+  icon={Mail}
+  type="email"
+  placeholder="Email Address"
+  value={email}
+  onChange={setEmail}
+/>
         <Field icon={Phone} placeholder="Phone Number" value={phoneNumber} onChange={setPhoneNumber} />
         <div className="grid grid-cols-2 gap-3">
           <Field icon={Lock} type="password" placeholder="Password" value={password} onChange={setPassword} />
