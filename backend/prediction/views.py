@@ -248,6 +248,7 @@ class PDFPredictionView(APIView):
 
         try:
 
+
             # ======================================================
             # 4. GET FEATURES REQUIRED BY THE ML MODEL
             # ======================================================
