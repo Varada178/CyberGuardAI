@@ -267,7 +267,7 @@ export function SignupScreen({
             className="w-full bg-transparent text-sm font-mono outline-none"
           >
             <option className="bg-[#06070A]">Administrator</option>
-            <option className="bg-[#06070A]">Security Analyst</option>
+            
           </select>
         </label>
 

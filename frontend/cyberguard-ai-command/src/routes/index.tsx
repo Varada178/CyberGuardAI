@@ -272,70 +272,31 @@ function CommandCenter({
           </div>
 
           {/* Center */}
-          <div className="order-1 lg:order-2 space-y-4">
+          {/* Center */}
+<div className="order-1 lg:order-2">
 
-            <div className="relative glass rounded-2xl p-4 overflow-hidden">
+  <div className="relative glass rounded-2xl p-4 overflow-hidden">
 
-              <div className="pointer-events-none absolute inset-x-0 top-0 h-16 bg-gradient-to-b from-cyan/10 to-transparent" />
+    <div className="pointer-events-none absolute inset-x-0 top-0 h-16 bg-gradient-to-b from-cyan/10 to-transparent" />
 
-              <div className="flex items-center justify-between text-xs uppercase tracking-[0.3em] text-muted-foreground">
+    <div className="flex items-center justify-between text-xs uppercase tracking-[0.3em] text-muted-foreground">
 
-                <span>
-                  Global Sensor Grid
-                </span>
+      <span>
+        Global Sensor Grid
+      </span>
 
-                <span className="flex items-center gap-1 text-cyan">
-                  <span className="h-1.5 w-1.5 bg-cyan rounded-full animate-pulse" />
-                  streaming
-                </span>
+      <span className="flex items-center gap-1 text-cyan">
+        <span className="h-1.5 w-1.5 bg-cyan rounded-full animate-pulse" />
+        streaming
+      </span>
 
-              </div>
+    </div>
 
-              <HoloGlobe />
+    <HoloGlobe />
 
-              <div className="mt-2 grid grid-cols-3 gap-2 text-center text-[10px] font-mono">
+  </div>
 
-                <div className="rounded border border-cyan/20 p-2">
-                  <div className="text-cyan text-lg">
-                    12,847
-                  </div>
-
-                  <div className="text-muted-foreground uppercase tracking-widest">
-                    Nodes
-                  </div>
-                </div>
-
-                <div className="rounded border border-cyan/20 p-2">
-                  <div className="text-safe text-lg">
-                    99.98%
-                  </div>
-
-                  <div className="text-muted-foreground uppercase tracking-widest">
-                    Uptime
-                  </div>
-                </div>
-
-                <div className="rounded border border-cyan/20 p-2">
-                  <div className="text-warn text-lg">
-                    3
-                  </div>
-
-                  <div className="text-muted-foreground uppercase tracking-widest">
-                    Alerts
-                  </div>
-                </div>
-
-              </div>
-            </div>
-
-            <ModuleGrid
-              onOpenModule={onOpenModule}
-              start={2}
-              end={4}
-              cols={2}
-            />
-
-          </div>
+</div>
 
           {/* Right */}
           <div className="space-y-4 order-3">
@@ -380,6 +341,7 @@ function CommandCenter({
 
           </span>
         </footer>
+
       </main>
 
       {/* Floating Analyze Network FAB */}
@@ -413,6 +375,7 @@ function CommandCenter({
 
         Analyze Network
       </motion.button>
+
     </div>
   );
 }

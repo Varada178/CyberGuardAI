@@ -117,7 +117,7 @@ export function HoloGlobe() {
           </g>
         ))}
 
-        {/* Nodes */}
+        Nodes
         {nodes.map((n, i) => (
           <g key={i}>
             <circle cx={n.x} cy={n.y} r="3" fill="rgba(56,220,255,0.15)">

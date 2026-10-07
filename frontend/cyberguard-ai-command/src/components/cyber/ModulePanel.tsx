@@ -221,13 +221,24 @@ function NetworkTraffic() {
           );
         })}
         {nodes.map((n) => (
-          <g key={n.id}>
-            <circle cx={n.x} cy={n.y} r="24" fill="url(#nodeGrad)" />
-            <circle cx={n.x} cy={n.y} r="10" fill="rgba(6,7,10,0.9)" stroke="#38dcff" strokeWidth="1.2" />
-            <text x={n.x} y={n.y + 4} textAnchor="middle" fontSize="8" fill="#38dcff" fontFamily="monospace">{n.id + 1}</text>
-            <text x={n.x} y={n.y + 34} textAnchor="middle" fontSize="9" fill="rgba(200,220,255,0.6)" fontFamily="monospace">{n.label}</text>
-          </g>
-        ))}
+  <g key={n.id}>
+    <circle
+      cx={n.x}
+      cy={n.y}
+      r="24"
+      fill="url(#nodeGrad)"
+    />
+
+    <circle
+      cx={n.x}
+      cy={n.y}
+      r="10"
+      fill="rgba(6,7,10,0.9)"
+      stroke="#38dcff"
+      strokeWidth="1.2"
+    />
+  </g>
+))}
       </svg>
     </div>
   );
@@ -656,14 +667,13 @@ function TrafficMonitor() {
 
 // ---------- AI Health ----------
 function AIHealth() {
-  const metrics = [
-    { l: "GPU Load", v: 72 },
-    { l: "Inference Latency", v: 12 },
-    { l: "Queue Depth", v: 3 },
-    { l: "Model Drift", v: 0.4 },
-    { l: "Uptime (days)", v: 47 },
-    { l: "Requests/min", v: 8420 },
-  ];
+ const metrics = [
+  { l: "GPU Load", v: 72 },
+  { l: "Inference Latency", v: 12 },
+  { l: "Queue Depth", v: 3 },
+  { l: "Model Drift", v: 0.4 },
+  { l: "Requests/min", v: 8420 },
+];
   return (
     <div className="grid grid-cols-2 md:grid-cols-3 gap-3">
       {metrics.map((m) => (
